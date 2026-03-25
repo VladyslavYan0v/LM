@@ -1,10 +1,13 @@
 import os
 import pygame
 import sys
+import ctypes
+from ctypes import wintypes
 
 # Constants
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 720
+
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 STAR_FRAME_DURATION = 0.75
@@ -224,32 +227,80 @@ class MainMenu:
             screen.blit(surf, surf.get_rect(center=(w // 2, int(h * 0.965))))
 
 class GameController:
-    """The main 'Engine' class that runs the program."""
+    """Engine class."""
+
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE)
-        pygame.display.set_caption("Project C OOP")
+
+        info = pygame.display.Info()
+        self.auto_width, self.auto_height = info.current_w, info.current_h
+
+        self.windowed_size = (self.auto_width // 2, self.auto_height // 2)
+        self.windowed_pos = (100, 100)
+
+        self.screen = pygame.display.set_mode(self.windowed_size)
+        pygame.display.set_caption("Project C")
+
         self.clock = pygame.time.Clock()
         self.assets = AssetManager()
         self.menu = MainMenu(self.assets)
         self.running = True
+        self.fullscreen = False
+
+    def _get_window_position(self):
+        if not sys.platform.startswith("win"):
+            return (100, 100)
+        hwnd = pygame.display.get_wm_info()["window"]
+        rect = wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        return (rect.left, rect.top)
+
+    def _set_window_position(self, x, y, width, height):
+        if not sys.platform.startswith("win"):
+            return
+        hwnd = pygame.display.get_wm_info()["window"]
+        ctypes.windll.user32.MoveWindow(hwnd, x, y, width, height, True)
+
+    def toggle_fullscreen(self):
+        if not self.fullscreen:
+            self.windowed_size = self.screen.get_size()
+            self.windowed_pos = self._get_window_position()
+
+            self.screen = pygame.display.set_mode(
+                (self.auto_width, self.auto_height), pygame.NOFRAME
+            )
+            if sys.platform.startswith("win"):
+                self._set_window_position(0, 0, self.auto_width, self.auto_height)
+
+            self.fullscreen = True
+        else:
+            self.screen = pygame.display.set_mode(self.windowed_size)
+            if sys.platform.startswith("win"):
+                x, y = self.windowed_pos
+                self._set_window_position(x, y, self.windowed_size[0], self.windowed_size[1])
+
+            self.fullscreen = False
+
+        self.menu.resize(*self.screen.get_size())
 
     def run(self):
         self.assets.play_music("music", "ingame_menu.flac")
-        
+
         while self.running:
             dt = self.clock.tick(60)
             mouse_pos = pygame.mouse.get_pos()
-            
-            # Auto-resize menu if window size changed
+
             if self.screen.get_size() != self.menu.last_screen_size:
                 self.menu.resize(*self.screen.get_size())
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_f or event.key == pygame.K_F5:
+                        self.toggle_fullscreen()
                 elif event.type == pygame.VIDEORESIZE:
-                    self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+                    pass
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     self.menu.handle_click()
 
