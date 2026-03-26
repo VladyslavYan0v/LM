@@ -129,13 +129,31 @@ class AnimatedFullscreenStar(FullscreenLayerItem):
 
 # Core Systems
 
+class PathHelper:
+    @staticmethod
+    def get_resource_path(relative_path):
+        try:
+            base_path = sys._MEIPASS
+        except AttributeError:
+            base_path = os.path.abspath(".")
+
+        return os.path.join(base_path, relative_path)
+
+    @staticmethod
+    def get_user_data_path(filename):
+        if getattr(sys, 'frozen', False):
+            base_path = os.path.dirname(sys.executable)
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            
+        return os.path.join(base_path, filename)
+
 class AssetManager:
     def __init__(self):
-        self.root = os.path.join(os.path.dirname(__file__), "embed")
-        self.settings_file = os.path.join(os.path.dirname(__file__), "settings.dat")
+        self.root = PathHelper.get_resource_path("embed")
+        self.settings_file = PathHelper.get_user_data_path("settings.dat")
         self.cache = {}
         
-        # Single Source of Truth
         self.music_vol = 0.6
         self.sfx_vol = 0.7
         self.res_index = 0
