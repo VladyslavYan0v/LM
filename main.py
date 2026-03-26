@@ -403,6 +403,7 @@ class SettingsMenu:
 class GameController:
     def __init__(self):
         pygame.init()
+        pygame.display.set_caption("Project C")
         self.assets = AssetManager()
         info = pygame.display.Info()
         self.auto_width, self.auto_height = info.current_w, info.current_h
