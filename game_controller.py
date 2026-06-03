@@ -4,7 +4,7 @@ import pygame
 from ctypes import wintypes
 from assets import AssetManager
 from constants import ScreenState
-from menus import MainMenuState, SettingsMenuState
+from menus import MainMenuState, SettingsMenuState, LoadMenuState, PauseMenuState
 from room import RoomState
 
 
@@ -27,11 +27,15 @@ class GameController:
 
         self.main_menu_state = MainMenuState(self.assets)
         self.settings_state = SettingsMenuState(self.assets, self.auto_width, self.auto_height, self.main_menu_state)
+        self.load_menu_state = LoadMenuState(self.assets, self.main_menu_state)
         self.level_state = RoomState(self.assets)
+        self.pause_menu_state = PauseMenuState(self.assets, self.auto_width, self.auto_height, self.level_state)
         self.states = {
             ScreenState.MAIN_MENU: self.main_menu_state,
             ScreenState.SETTINGS: self.settings_state,
             ScreenState.LEVEL: self.level_state,
+            ScreenState.LOAD_MENU: self.load_menu_state,
+            ScreenState.PAUSE_MENU: self.pause_menu_state,
         }
 
         self.clock = pygame.time.Clock()
@@ -88,18 +92,29 @@ class GameController:
         return pygame.display.set_mode(size, flags)
 
     def set_state(self, state_id):
+        old_state = self.current_state
         self.current_state = self.states[state_id]
         current_size = self.screen.get_size()
         self.current_state.resize(*current_size)
 
         if state_id == ScreenState.MAIN_MENU:
             self.main_menu_state.reset_hovers()
+            if old_state not in (self.settings_state, self.load_menu_state):
+                self.main_menu_state.reset_transition()
+        elif state_id == ScreenState.PAUSE_MENU:
+            self.pause_menu_state.fade_alpha = 0
+            self.pause_menu_state.transition_target = None
+        elif state_id == ScreenState.LOAD_MENU:
+            self.load_menu_state.fade_alpha = 0
+            self.load_menu_state.transition_target_level = None
 
     def apply_layout_update(self):
         width, height = self.screen.get_size()
         self.main_menu_state.resize(width, height)
         self.settings_state.resize(width, height)
         self.level_state.resize(width, height)
+        self.load_menu_state.resize(width, height)
+        self.pause_menu_state.resize(width, height)
 
     def toggle_fullscreen(self):
         if not self.assets.is_fullscreen:
@@ -161,10 +176,21 @@ class GameController:
                 if isinstance(state_change, ScreenState):
                     self.set_state(state_change)
 
-                if getattr(self.current_state, "pending_command", None) == "APPLY_DISPLAY_MODE":
-                    self._apply_display_mode()
-                    if hasattr(self.current_state, "clear_pending_command"):
-                        self.current_state.clear_pending_command()
+            cmd_state = self.current_state
+            cmd = getattr(cmd_state, "pending_command", None)
+            
+            if cmd is not None:
+                if hasattr(cmd_state, "clear_pending_command"):
+                    cmd_state.clear_pending_command()
+
+            if cmd == "APPLY_DISPLAY_MODE":
+                 self._apply_display_mode()
+            elif isinstance(cmd, tuple) and cmd[0] == "START_LEVEL":
+                 self.level_state.setup_level(cmd[1])
+                 self.set_state(ScreenState.LEVEL)
+            elif cmd == "GOTO_MAIN_MENU":
+                 self.assets.play_music("music", "ingame_menu.flac")
+                 self.set_state(ScreenState.MAIN_MENU)
 
             self.current_state.update(dt, mouse_pos)
             self.current_state.draw(self.screen)

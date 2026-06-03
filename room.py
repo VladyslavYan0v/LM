@@ -51,6 +51,8 @@ class RoomMap:
         self.filename = filename
         self.width = 0
         self.height = 0
+        self.start_x = 0
+        self.start_y = 0
         self.grid = []
         self.tile_images = {}
         self.inverted_tile_images = {}
@@ -62,10 +64,10 @@ class RoomMap:
             raise FileNotFoundError(f"Room file not found: {room_path}")
 
         with open(room_path, "rb") as file_handle:
-            header = file_handle.read(4)
-            if len(header) != 4:
+            header = file_handle.read(8)
+            if len(header) != 8:
                 raise ValueError("Room file header is too short")
-            self.width, self.height = struct.unpack("<HH", header)
+            self.width, self.height, self.start_x, self.start_y = struct.unpack("<HHHH", header)
             raw = file_handle.read(self.width * self.height)
             if len(raw) != self.width * self.height:
                 raise ValueError("Room file data length does not match width*height")
@@ -171,9 +173,10 @@ class RoomState:
     def __init__(self, assets: AssetManager):
         self.assets = assets
         self.pending_command = None
-        self.room_map = RoomMap(self.assets, "level1.dat")
-        self.player_x = 1
-        self.player_y = 3
+        self.room_map = None
+        self.current_level_idx = 0
+        self.player_x = 0
+        self.player_y = 0
         self.world_inverted = False
         self.tile_size = 32
         self.offset = (0, 0)
@@ -181,6 +184,13 @@ class RoomState:
         self.hint_font = None
         self.player_facing = 1
         self.player_sprite = None
+        self.move_this_frame = False
+        self.fade_alpha = 255
+        self.fade_direction = -1
+        self.level_complete = False
+        self.transition_target = None
+        self.menu_btn_rect = pygame.Rect(0, 0, 1, 1)
+        self.next_btn_rect = pygame.Rect(0, 0, 1, 1)
         sprite_candidates = [
             os.path.join(self.assets.root, "hero", "hero.png"),
             os.path.join(self.assets.root, "rooms", "player.png"),
@@ -197,48 +207,149 @@ class RoomState:
     def clear_pending_command(self):
         self.pending_command = None
 
+    def setup_level(self, level_index: int):
+        self.current_level_idx = level_index
+        filenames = {0: "tutorial.dat", 1: "level1.dat", 2: "level2.dat", 3: "level3.dat"}
+        filename = filenames.get(level_index, "tutorial.dat")
+        
+        try:
+            self.room_map = RoomMap(self.assets, filename)
+        except FileNotFoundError:
+            print(f"Level {filename} not found, falling back to level1.dat")
+            self.room_map = RoomMap(self.assets, "level1.dat")
+            
+        self.fade_alpha = 255
+        self.fade_direction = -1
+        self.level_complete = False
+        self.transition_target = None
+        self.assets.play_music("music", "Through_the_Hollow_Arch.flac")
+        self.reset()
+
+    def reset(self):
+        if not self.room_map:
+            return
+        self.player_x = self.room_map.start_x
+        self.player_y = self.room_map.start_y
+        self.world_inverted = False
+        self.player_facing = 1
+        self.move_this_frame = False
+
     def resize(self, width: int, height: int):
-        self.tile_size = min(width // self.room_map.width, height // self.room_map.height)
-        self.tile_size = max(32, min(self.tile_size, 96))
-        grid_width = self.tile_size * self.room_map.width
-        grid_height = self.tile_size * self.room_map.height
-        self.offset = ((width - grid_width) // 2, (height - grid_height) // 2)
+        self.tile_size = max(48, int(height * 0.08))
         self.font = get_font(max(16, int(height * 0.035)))
         self.hint_font = get_font(max(14, int(height * 0.025)))
+        
+        btn_width = int(width * 0.25)
+        btn_height = int(height * 0.08)
+        self.menu_btn_rect = pygame.Rect(0, 0, btn_width, btn_height)
+        self.menu_btn_rect.center = (width // 2 - int(btn_width * 0.6), height // 2 + int(height * 0.1))
+        self.next_btn_rect = pygame.Rect(0, 0, btn_width, btn_height)
+        self.next_btn_rect.center = (width // 2 + int(btn_width * 0.6), height // 2 + int(height * 0.1))
 
     def handle_event(self, event):
+        if self.fade_direction == 1:
+            return None
+            
+        if self.level_complete:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self.menu_btn_rect.collidepoint(event.pos):
+                    self.assets.play_sfx("sfx", "click.wav")
+                    pygame.mixer.music.fadeout(1000)
+                    self.transition_target = "GOTO_MAIN_MENU"
+                    self.fade_direction = 1
+                elif self.next_btn_rect.collidepoint(event.pos) and self.current_level_idx < 3:
+                    self.assets.play_sfx("sfx", "click.wav")
+                    pygame.mixer.music.fadeout(1000)
+                    self.transition_target = ("START_LEVEL", self.current_level_idx + 1)
+                    self.fade_direction = 1
+            return None
+
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
-                return ScreenState.MAIN_MENU
+                return ScreenState.PAUSE_MENU
 
             if event.key == pygame.K_i:
                 self.world_inverted = not self.world_inverted
                 self.assets.play_sfx("sfx", "click.wav")
                 return None
-
-            if event.key in self.MOVE_KEYS:
-                dx, dy = self.MOVE_KEYS[event.key]
-                target_x = self.player_x + dx
-                target_y = self.player_y + dy
-                if self.room_map.is_walkable(target_x, target_y, self.world_inverted):
-                    if dx < 0:
-                        self.player_facing = -1
-                    elif dx > 0:
-                        self.player_facing = 1
-                    self.player_x = target_x
-                    self.player_y = target_y
-                    tile_id = self.room_map.get_tile(target_x, target_y, False)
-                    if tile_id == self.room_map.TILE_PORTAL or tile_id == self.room_map.TILE_PORTAL_INVERTED:
-                        self.world_inverted = not self.world_inverted
-                        self.assets.play_sfx("sfx", "click.wav")
+                
+            if event.key == pygame.K_p:
+                self.level_complete = True
+                self.assets.max_unlocked_level = max(self.assets.max_unlocked_level, self.current_level_idx + 1)
+                self.assets.save_settings()
+                self.assets.play_sfx("sfx", "click.wav")
                 return None
 
         return None
 
     def update(self, dt, mouse_pos):
-        pass
+        if self.fade_direction == -1:
+            self.fade_alpha = max(0, self.fade_alpha - dt * 0.25)
+            if self.fade_alpha == 0:
+                self.fade_direction = 0
+        elif self.fade_direction == 1:
+            self.fade_alpha = min(255, self.fade_alpha + dt * 0.25)
+            if self.fade_alpha == 255:
+                self.fade_direction = 0
+                self.pending_command = self.transition_target
+                self.transition_target = None
+            return
+            
+        if self.level_complete:
+            return
+
+        keys = pygame.key.get_pressed()
+        
+        pressed_moves = []
+        for key, (dx, dy) in self.MOVE_KEYS.items():
+            if keys[key]:
+                pressed_moves.append((dx, dy))
+        
+        if pressed_moves and not self.move_this_frame:
+            dx, dy = pressed_moves[0]
+            target_x = self.player_x + dx
+            target_y = self.player_y + dy
+            if self.room_map.is_walkable(target_x, target_y, self.world_inverted):
+                if dx < 0:
+                    self.player_facing = -1
+                elif dx > 0:
+                    self.player_facing = 1
+                self.player_x = target_x
+                self.player_y = target_y
+                self.move_this_frame = True
+                tile_id = self.room_map.get_tile(target_x, target_y, False)
+                if tile_id == self.room_map.TILE_PORTAL or tile_id == self.room_map.TILE_PORTAL_INVERTED:
+                    self.world_inverted = not self.world_inverted
+                    self.assets.play_sfx("sfx", "click.wav")
+        
+        if not keys[pygame.K_UP] and not keys[pygame.K_w] and not keys[pygame.K_DOWN] and not keys[pygame.K_s] and not keys[pygame.K_LEFT] and not keys[pygame.K_a] and not keys[pygame.K_RIGHT] and not keys[pygame.K_d]:
+            self.move_this_frame = False
 
     def draw(self, screen):
+        if not self.room_map:
+            return
+            
+        screen_width, screen_height = screen.get_size()
+
+        map_pixel_width = self.room_map.width * self.tile_size
+        map_pixel_height = self.room_map.height * self.tile_size
+        
+        player_pixel_x = self.player_x * self.tile_size + self.tile_size // 2
+        player_pixel_y = self.player_y * self.tile_size + self.tile_size // 2
+
+        camera_x = player_pixel_x - screen_width // 2
+        camera_y = player_pixel_y - screen_height // 2
+
+        camera_x = max(0, min(camera_x, map_pixel_width - screen_width))
+        camera_y = max(0, min(camera_y, map_pixel_height - screen_height))
+
+        if map_pixel_width < screen_width:
+            camera_x = -(screen_width - map_pixel_width) // 2
+        if map_pixel_height < screen_height:
+            camera_y = -(screen_height - map_pixel_height) // 2
+
+        self.offset = (-camera_x, -camera_y)
+
         screen.fill((10, 10, 20))
 
         for y in range(self.room_map.height):
@@ -261,7 +372,6 @@ class RoomState:
                         else:
                             pygame.draw.rect(screen, self.room_map.get_tile_color(raw_tile, self.world_inverted), portal_rect)
                     else:
-                        # Skip internal portal blocks; the full 2x2 portal is drawn once from its top-left origin.
                         continue
                 else:
                     image = self.room_map.get_tile_image(raw_tile, self.world_inverted)
@@ -292,7 +402,8 @@ class RoomState:
             )
 
         if self.font:
-            title = "Level 1 — World inversion demo"
+            level_name = "Tutorial" if self.current_level_idx == 0 else f"Level {self.current_level_idx}"
+            title = f"{level_name}"
             text_surface = self.font.render(title, True, WHITE)
             screen.blit(text_surface, (20, 20))
 
@@ -300,5 +411,31 @@ class RoomState:
             state_surface = self.hint_font.render(f"World: {state_text}", True, WHITE)
             screen.blit(state_surface, (20, 60))
 
-            hint_surface = self.hint_font.render("Use WASD/arrow keys to move, I to invert world, ESC to return", True, WHITE)
+            hint_surface = self.hint_font.render("Use WASD/arrows to move, I to invert, ESC for Pause. Press 'P' to cheat win.", True, WHITE)
             screen.blit(hint_surface, (20, screen.get_height() - 40))
+            
+        if self.level_complete:
+            overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            screen.blit(overlay, (0, 0))
+
+            title_surface = self.font.render("LEVEL COMPLETED!", True, (100, 255, 100))
+            screen.blit(title_surface, title_surface.get_rect(center=(screen_width // 2, screen_height // 2 - int(screen_height * 0.15))))
+
+            mouse_pos = pygame.mouse.get_pos()
+            self._draw_button(screen, self.menu_btn_rect, "Main Menu", mouse_pos, (180, 40, 40))
+            if self.current_level_idx < 3:
+                self._draw_button(screen, self.next_btn_rect, "Next Level", mouse_pos, (60, 160, 80))
+
+        if self.fade_alpha > 0:
+            fade_surface = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+            fade_surface.fill((0, 0, 0, min(255, int(self.fade_alpha))))
+            screen.blit(fade_surface, (0, 0))
+
+    def _draw_button(self, screen, rect, label, mouse_pos, base_color):
+        hovered = rect.collidepoint(mouse_pos)
+        color = tuple(min(value + 40, 255) for value in base_color) if hovered else base_color
+        pygame.draw.rect(screen, color, rect, border_radius=10)
+        if self.hint_font:
+            label_surface = self.hint_font.render(label, True, WHITE)
+            screen.blit(label_surface, label_surface.get_rect(center=rect.center))

@@ -59,11 +59,21 @@ class MainMenuState(GameState):
         self.scaled_overlay = None
         self.scaled_logo = None
         self.hint_font = None
+        
+        self.transition_target_level = None
+        self.fade_alpha = 255
+        self.fade_direction = -1
 
     def reset_hovers(self):
         self.purple_door.hovered = False
         self.gray_door.hovered = False
         self.star_anim.hovered = False
+
+    def reset_transition(self):
+        self.transition_target_level = None
+        self.pending_command = None
+        self.fade_alpha = 255
+        self.fade_direction = -1
 
     def resize(self, width, height):
         if self.bg_img:
@@ -88,6 +98,19 @@ class MainMenuState(GameState):
         self.hint_font = get_font(max(18, int(height * 0.045)))
 
     def update(self, dt, mouse_pos):
+        if self.fade_direction == -1:
+            self.fade_alpha = max(0, self.fade_alpha - dt * 0.25)
+            if self.fade_alpha == 0:
+                self.fade_direction = 0
+        elif self.fade_direction == 1:
+            self.fade_alpha = min(255, self.fade_alpha + dt * 0.25)
+            if self.fade_alpha == 255:
+                self.fade_direction = 0
+                if self.transition_target_level is not None:
+                    self.pending_command = ("START_LEVEL", self.transition_target_level)
+                    self.transition_target_level = None
+            return
+
         self.star_anim.update_animation(dt)
 
         if self.glide_progress < 1.0:
@@ -100,6 +123,9 @@ class MainMenuState(GameState):
         self.star_anim.hovered = self.star_anim.is_hovering(mouse_pos)
 
     def handle_event(self, event):
+        if self.fade_direction == 1:
+            return None
+
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.gray_door.hovered:
                 self.assets.play_sfx("sfx", "click.wav")
@@ -108,11 +134,15 @@ class MainMenuState(GameState):
 
             if self.purple_door.hovered:
                 self.assets.play_sfx("sfx", "click.wav")
-                return ScreenState.LEVEL
+                pygame.mixer.music.fadeout(1000)
+                self.transition_target_level = 0
+                self.fade_direction = 1
+                return None
 
             if self.star_anim.hovered:
                 self.assets.play_sfx("sfx", "click.wav")
-                print("[action] save_menu()")
+                self.reset_hovers()
+                return ScreenState.LOAD_MENU
 
         return None
 
@@ -140,6 +170,11 @@ class MainMenuState(GameState):
             message = "Start New Game" if self.purple_door.hovered else "Load Save Menu" if self.star_anim.hovered else "Settings"
             hint_surface = self.hint_font.render(message, True, WHITE)
             screen.blit(hint_surface, hint_surface.get_rect(center=(screen.get_width() // 2, int(screen.get_height() * 0.965))))
+
+        if self.fade_alpha > 0:
+            fade_surface = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+            fade_surface.fill((0, 0, 0, min(255, int(self.fade_alpha))))
+            screen.blit(fade_surface, (0, 0))
 
 
 class SettingsMenuState(GameState):
@@ -185,7 +220,6 @@ class SettingsMenuState(GameState):
     def update(self, dt, mouse_pos):
         if self.background_state:
             self.background_state.star_anim.update_animation(dt)
-            self.background_state.reset_hovers()
 
     def handle_event(self, event):
         if self.music_slider.handle_event(event):
@@ -245,3 +279,205 @@ class SettingsMenuState(GameState):
         pygame.draw.rect(screen, color, rect, border_radius=10)
         label_surface = self.font.render(label, True, WHITE)
         screen.blit(label_surface, label_surface.get_rect(center=rect.center))
+
+
+class LoadMenuState(GameState):
+    def __init__(self, assets, main_menu_state):
+        super().__init__(assets)
+        self.main_menu_state = main_menu_state
+        self.level_buttons = []
+        self.back_btn_rect = pygame.Rect(0, 0, 1, 1)
+        self.font = None
+        self.transition_target_level = None
+        self.fade_alpha = 0
+
+    def resize(self, width, height):
+        center_x, center_y = width // 2, height // 2
+        button_width = int(width * 0.25)
+        button_height = int(height * 0.08)
+        
+        self.level_buttons = []
+        for i in range(1, 4):
+            rect = pygame.Rect(0, 0, button_width, button_height)
+            rect.center = (center_x, center_y - int(height * 0.1) + (i - 1) * int(height * 0.12))
+            self.level_buttons.append((i, rect))
+            
+        self.back_btn_rect = pygame.Rect(0, 0, int(button_width * 0.7), button_height)
+        self.back_btn_rect.center = (center_x, center_y + int(height * 0.35))
+        self.font = get_font(max(18, int(height * 0.04)))
+
+    def update(self, dt, mouse_pos):
+        if self.main_menu_state:
+            self.main_menu_state.star_anim.update_animation(dt)
+
+        if self.transition_target_level is not None:
+            self.fade_alpha = min(255, self.fade_alpha + dt * 0.25)
+            if self.fade_alpha == 255:
+                self.pending_command = ("START_LEVEL", self.transition_target_level)
+                self.transition_target_level = None
+            return
+
+    def handle_event(self, event):
+        if self.transition_target_level is not None: return None
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mouse_pos = event.pos
+            
+            for level_num, rect in self.level_buttons:
+                if rect.collidepoint(mouse_pos):
+                    if self.assets.max_unlocked_level >= level_num:
+                        self.assets.play_sfx("sfx", "click.wav")
+                        pygame.mixer.music.fadeout(1000)
+                        self.transition_target_level = level_num
+                        return None
+                    else:
+                        self.assets.play_sfx("sfx", "error.wav")
+
+            if self.back_btn_rect.collidepoint(mouse_pos):
+                self.assets.play_sfx("sfx", "click.wav")
+                return ScreenState.MAIN_MENU
+        return None
+
+    def draw(self, screen):
+        if self.main_menu_state:
+            self.main_menu_state.draw(screen)
+
+        overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 210))
+        screen.blit(overlay, (0, 0))
+
+        if not self.font:
+            return
+
+        mouse_pos = pygame.mouse.get_pos()
+        title = self.font.render("SELECT LEVEL", True, WHITE)
+        screen.blit(title, title.get_rect(center=(screen.get_width() // 2, screen.get_height() * 0.15)))
+
+        for level_num, rect in self.level_buttons:
+            is_unlocked = self.assets.max_unlocked_level >= level_num
+            base_color = (60, 160, 80) if is_unlocked else (100, 100, 100)
+            hovered = rect.collidepoint(mouse_pos) and is_unlocked
+            color = tuple(min(value + 40, 255) for value in base_color) if hovered else base_color
+            
+            pygame.draw.rect(screen, color, rect, border_radius=10)
+            label = f"Level {level_num}" + ("" if is_unlocked else " (Locked)")
+            label_surface = self.font.render(label, True, WHITE if is_unlocked else (180, 180, 180))
+            screen.blit(label_surface, label_surface.get_rect(center=rect.center))
+
+        self._draw_button(screen, self.back_btn_rect, "Back", mouse_pos, (180, 40, 40))
+
+        if self.fade_alpha > 0:
+            fade_surface = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+            fade_surface.fill((0, 0, 0, min(255, int(self.fade_alpha))))
+            screen.blit(fade_surface, (0, 0))
+
+    def _draw_button(self, screen, rect, label, mouse_pos, base_color):
+        hovered = rect.collidepoint(mouse_pos)
+        color = tuple(min(value + 40, 255) for value in base_color) if hovered else base_color
+        pygame.draw.rect(screen, color, rect, border_radius=10)
+        label_surface = self.font.render(label, True, WHITE)
+        screen.blit(label_surface, label_surface.get_rect(center=rect.center))
+
+
+class PauseMenuState(GameState):
+    def __init__(self, assets, auto_width, auto_height, level_state):
+        super().__init__(assets)
+        self.level_state = level_state
+        self.res_options = SettingsMenuState(assets, auto_width, auto_height, None).res_options
+        self.music_slider = HorizontalSlider("Music Volume", 0, 0, 100, self.assets.music_vol)
+        self.sfx_slider = HorizontalSlider("Sound Effects", 0, 0, 100, self.assets.sfx_vol)
+        
+        self.resume_btn = pygame.Rect(0, 0, 1, 1)
+        self.restart_btn = pygame.Rect(0, 0, 1, 1)
+        self.res_btn = pygame.Rect(0, 0, 1, 1)
+        self.menu_btn = pygame.Rect(0, 0, 1, 1)
+        self.font = None
+        self.transition_target = None
+        self.fade_alpha = 0
+
+    def resize(self, width, height):
+        center_x, center_y = width // 2, height // 2
+        slider_width = int(width * 0.35)
+        button_width = int(width * 0.25)
+        button_height = int(height * 0.07)
+        
+        self.resume_btn = pygame.Rect(0, 0, button_width, button_height)
+        self.resume_btn.center = (center_x, center_y - int(height * 0.25))
+        
+        self.restart_btn = pygame.Rect(0, 0, button_width, button_height)
+        self.restart_btn.center = (center_x, center_y - int(height * 0.15))
+
+        self.music_slider.rect.width = slider_width
+        self.sfx_slider.rect.width = slider_width
+        self.music_slider.rect.center = (center_x, center_y - int(height * 0.01))
+        self.sfx_slider.rect.center = (center_x, center_y + int(height * 0.12))
+
+        self.res_btn = pygame.Rect(0, 0, button_width, button_height)
+        self.res_btn.center = (center_x, center_y + int(height * 0.25))
+
+        self.menu_btn = pygame.Rect(0, 0, button_width, button_height)
+        self.menu_btn.center = (center_x, center_y + int(height * 0.37))
+
+        self.font = get_font(max(16, int(height * 0.035)))
+        
+    def update(self, dt, mouse_pos):
+        if self.transition_target:
+            self.fade_alpha = min(255, self.fade_alpha + dt * 0.25)
+            if self.fade_alpha == 255:
+                self.pending_command = self.transition_target
+                self.transition_target = None
+
+    def handle_event(self, event):
+        if self.transition_target: return None
+
+        if self.music_slider.handle_event(event):
+            self.assets.set_music_volume(self.music_slider.value)
+        if self.sfx_slider.handle_event(event):
+            self.assets.set_sfx_volume(self.sfx_slider.value)
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mouse_pos = event.pos
+            if self.resume_btn.collidepoint(mouse_pos):
+                self.assets.play_sfx("sfx", "click.wav")
+                return ScreenState.LEVEL
+            elif self.restart_btn.collidepoint(mouse_pos):
+                self.assets.play_sfx("sfx", "click.wav")
+                self.level_state.setup_level(self.level_state.current_level_idx)
+                return ScreenState.LEVEL
+            elif self.res_btn.collidepoint(mouse_pos):
+                self.assets.res_index = (self.assets.res_index + 1) % len(self.res_options)
+                self.assets.is_fullscreen = self.assets.res_index == len(self.res_options) - 1
+                self.assets.set_video_settings(self.assets.res_index, self.assets.is_fullscreen)
+                self.pending_command = "APPLY_DISPLAY_MODE"
+                self.assets.play_sfx("sfx", "click.wav")
+            elif self.menu_btn.collidepoint(mouse_pos):
+                self.assets.play_sfx("sfx", "click.wav")
+                pygame.mixer.music.fadeout(1000)
+                self.transition_target = "GOTO_MAIN_MENU"
+                return None
+        return None
+
+    def draw(self, screen):
+        if self.level_state:
+            self.level_state.draw(screen)
+            
+        overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        screen.blit(overlay, (0, 0))
+        
+        if not self.font: return
+        
+        mouse_pos = pygame.mouse.get_pos()
+        SettingsMenuState._draw_button(self, screen, self.resume_btn, "Resume", mouse_pos, (60, 140, 60))
+        SettingsMenuState._draw_button(self, screen, self.restart_btn, "Restart Level", mouse_pos, (140, 100, 40))
+        self.music_slider.draw(screen, self.font, screen.get_height())
+        self.sfx_slider.draw(screen, self.font, screen.get_height())
+        
+        resolution_label = self.res_options[self.assets.res_index][2]
+        SettingsMenuState._draw_button(self, screen, self.res_btn, f"Resolution: {resolution_label}", mouse_pos, (120, 120, 120))
+        SettingsMenuState._draw_button(self, screen, self.menu_btn, "Quit to Main Menu", mouse_pos, (180, 40, 40))
+        
+        if self.fade_alpha > 0:
+            fade_surface = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+            fade_surface.fill((0, 0, 0, min(255, int(self.fade_alpha))))
+            screen.blit(fade_surface, (0, 0))
