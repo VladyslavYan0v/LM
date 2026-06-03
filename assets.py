@@ -22,6 +22,7 @@ class AssetManager:
         self.res_index = 0
         self.last_windowed_index = 1
         self.is_fullscreen = False
+        self.max_unlocked_level = 0
 
         self.load_settings()
 
@@ -42,6 +43,7 @@ class AssetManager:
         self.is_fullscreen = data.get("is_fullscreen", self.is_fullscreen)
         self.last_windowed_index = data.get("last_windowed_index", self.last_windowed_index)
         self.last_windowed_index = self.last_windowed_index if self.last_windowed_index < 4 else 1
+        self.max_unlocked_level = data.get("max_unlocked_level", 0)
 
         try:
             pygame.mixer.music.set_volume(self.music_vol)
@@ -57,6 +59,7 @@ class AssetManager:
                     "res_index": self.res_index,
                     "is_fullscreen": self.is_fullscreen,
                     "last_windowed_index": self.last_windowed_index,
+                    "max_unlocked_level": self.max_unlocked_level,
                 }, file_handle)
         except Exception:
             pass
@@ -67,6 +70,7 @@ class AssetManager:
         self.res_index = 0
         self.last_windowed_index = 0
         self.is_fullscreen = False
+        self.max_unlocked_level = 0
         try:
             pygame.mixer.music.set_volume(self.music_vol)
         except Exception:
@@ -116,6 +120,7 @@ class AssetManager:
 
     def play_music(self, *path_parts):
         try:
+            pygame.mixer.music.stop()
             pygame.mixer.music.load(self._get_path(*path_parts))
             pygame.mixer.music.set_volume(self.music_vol)
             pygame.mixer.music.play(-1)

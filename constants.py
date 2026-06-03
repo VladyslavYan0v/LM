@@ -13,6 +13,8 @@ class ScreenState(Enum):
     MAIN_MENU = "MAIN_MENU"
     SETTINGS = "SETTINGS"
     LEVEL = "LEVEL"
+    LOAD_MENU = "LOAD_MENU"
+    PAUSE_MENU = "PAUSE_MENU"
 
 
 def get_font(size, bold=True):
