@@ -1,3 +1,4 @@
+import os
 import pygame
 from constants import WHITE, GRAY, GLIDE_SPEED, ScreenState, get_font
 from ui_components import HorizontalSlider, FullscreenLayerItem, AnimatedFullscreenStar
@@ -107,7 +108,7 @@ class MainMenuState(GameState):
 
             if self.purple_door.hovered:
                 self.assets.play_sfx("sfx", "click.wav")
-                print("[action] start_game()")
+                return ScreenState.LEVEL
 
             if self.star_anim.hovered:
                 self.assets.play_sfx("sfx", "click.wav")

@@ -12,6 +12,7 @@ GLIDE_SPEED = 0.005
 class ScreenState(Enum):
     MAIN_MENU = "MAIN_MENU"
     SETTINGS = "SETTINGS"
+    LEVEL = "LEVEL"
 
 
 def get_font(size, bold=True):

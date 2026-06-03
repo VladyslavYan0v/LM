@@ -5,6 +5,7 @@ from ctypes import wintypes
 from assets import AssetManager
 from constants import ScreenState
 from menus import MainMenuState, SettingsMenuState
+from room import RoomState
 
 
 class GameController:
@@ -26,9 +27,11 @@ class GameController:
 
         self.main_menu_state = MainMenuState(self.assets)
         self.settings_state = SettingsMenuState(self.assets, self.auto_width, self.auto_height, self.main_menu_state)
+        self.level_state = RoomState(self.assets)
         self.states = {
             ScreenState.MAIN_MENU: self.main_menu_state,
             ScreenState.SETTINGS: self.settings_state,
+            ScreenState.LEVEL: self.level_state,
         }
 
         self.clock = pygame.time.Clock()
@@ -96,6 +99,7 @@ class GameController:
         width, height = self.screen.get_size()
         self.main_menu_state.resize(width, height)
         self.settings_state.resize(width, height)
+        self.level_state.resize(width, height)
 
     def toggle_fullscreen(self):
         if not self.assets.is_fullscreen:
@@ -157,9 +161,10 @@ class GameController:
                 if isinstance(state_change, ScreenState):
                     self.set_state(state_change)
 
-                if self.current_state.pending_command == "APPLY_DISPLAY_MODE":
+                if getattr(self.current_state, "pending_command", None) == "APPLY_DISPLAY_MODE":
                     self._apply_display_mode()
-                    self.current_state.clear_pending_command()
+                    if hasattr(self.current_state, "clear_pending_command"):
+                        self.current_state.clear_pending_command()
 
             self.current_state.update(dt, mouse_pos)
             self.current_state.draw(self.screen)

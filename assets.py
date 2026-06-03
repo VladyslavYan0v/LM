@@ -95,6 +95,9 @@ class AssetManager:
     def _get_path(self, *path_parts):
         return os.path.join(self.root, *path_parts)
 
+    def get_path(self, *path_parts):
+        return self._get_path(*path_parts)
+
     def get_image(self, *path_parts):
         full_path = self._get_path(*path_parts)
         if full_path in self.cache:
