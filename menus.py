@@ -1,5 +1,6 @@
 import os
 import pygame
+from commands import ApplyDisplayModeCommand, GoToMainMenuCommand, StartLevelCommand, StartStoryCommand
 from constants import WHITE, GRAY, GLIDE_SPEED, ScreenState, get_font
 from ui_components import HorizontalSlider, FullscreenLayerItem, AnimatedFullscreenStar
 
@@ -22,6 +23,12 @@ class GameState:
         pass
 
     def draw(self, screen):
+        pass
+
+    def on_enter(self):
+        pass
+
+    def on_exit(self):
         pass
 
 
@@ -107,7 +114,7 @@ class MainMenuState(GameState):
             if self.fade_alpha == 255:
                 self.fade_direction = 0
                 if self.transition_target_level is not None:
-                    self.pending_command = ("START_STORY", self.transition_target_level)
+                    self.pending_command = StartStoryCommand(self.transition_target_level)
                     self.transition_target_level = None
             return
 
@@ -134,7 +141,7 @@ class MainMenuState(GameState):
 
             if self.purple_door.hovered:
                 self.assets.play_sfx("sfx", "click.wav")
-                pygame.mixer.music.fadeout(1000)
+                self.assets.fadeout_music(1000)
                 self.transition_target_level = 0
                 self.fade_direction = 1
                 return None
@@ -321,7 +328,7 @@ class StoryState(GameState):
             self.fade_alpha = min(255, self.fade_alpha + dt * 0.25)
             if self.fade_alpha == 255:
                 self.fade_direction = 0
-                self.pending_command = ("START_LEVEL", self.target_level)
+                self.pending_command = StartLevelCommand(self.target_level)
             return
 
         if self.fade_direction != 0: return
@@ -358,7 +365,7 @@ class StoryState(GameState):
                     self.current_line += 1
                     if self.current_line >= len(self.dialogue):
                         self.fade_direction = 1
-                        pygame.mixer.music.fadeout(1000)
+                        self.assets.fadeout_music(1000)
                     else:
                         self._load_current_line()
             return None
@@ -447,14 +454,14 @@ class SettingsMenuState(GameState):
                 self.assets.res_index = (self.assets.res_index + 1) % len(self.res_options)
                 self.assets.is_fullscreen = self.assets.res_index == len(self.res_options) - 1
                 self.assets.set_video_settings(self.assets.res_index, self.assets.is_fullscreen)
-                self.pending_command = "APPLY_DISPLAY_MODE"
+                self.pending_command = ApplyDisplayModeCommand()
                 self.assets.play_sfx("sfx", "click.wav")
 
             elif self.reset_btn_rect.collidepoint(event.pos):
                 self.assets.reset_settings()
                 self.music_slider.value = self.assets.music_vol
                 self.sfx_slider.value = self.assets.sfx_vol
-                self.pending_command = "APPLY_DISPLAY_MODE"
+                self.pending_command = ApplyDisplayModeCommand()
                 self.assets.play_sfx("sfx", "click.wav")
 
             elif self.back_btn_rect.collidepoint(event.pos):
@@ -527,7 +534,7 @@ class LoadMenuState(GameState):
         if self.transition_target_level is not None:
             self.fade_alpha = min(255, self.fade_alpha + dt * 0.25)
             if self.fade_alpha == 255:
-                self.pending_command = ("START_STORY", self.transition_target_level)
+                self.pending_command = StartStoryCommand(self.transition_target_level)
                 self.transition_target_level = None
             return
 
@@ -541,7 +548,7 @@ class LoadMenuState(GameState):
                 if rect.collidepoint(mouse_pos):
                     if self.assets.max_unlocked_level >= level_num:
                         self.assets.play_sfx("sfx", "click.wav")
-                        pygame.mixer.music.fadeout(1000)
+                        self.assets.fadeout_music(1000)
                         self.transition_target_level = level_num
                         return None
                     else:
@@ -662,12 +669,12 @@ class PauseMenuState(GameState):
                 self.assets.res_index = (self.assets.res_index + 1) % len(self.res_options)
                 self.assets.is_fullscreen = self.assets.res_index == len(self.res_options) - 1
                 self.assets.set_video_settings(self.assets.res_index, self.assets.is_fullscreen)
-                self.pending_command = "APPLY_DISPLAY_MODE"
+                self.pending_command = ApplyDisplayModeCommand()
                 self.assets.play_sfx("sfx", "click.wav")
             elif self.menu_btn.collidepoint(mouse_pos):
                 self.assets.play_sfx("sfx", "click.wav")
-                pygame.mixer.music.fadeout(1000)
-                self.transition_target = "GOTO_MAIN_MENU"
+                self.assets.fadeout_music(1000)
+                self.transition_target = GoToMainMenuCommand()
                 return None
         return None
 

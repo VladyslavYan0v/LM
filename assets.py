@@ -127,6 +127,12 @@ class AssetManager:
         except Exception:
             pass
 
+    def fadeout_music(self, duration_ms):
+        try:
+            pygame.mixer.music.fadeout(duration_ms)
+        except Exception:
+            pass
+
     def play_sfx(self, *path_parts):
         try:
             full_path = self._get_path(*path_parts)

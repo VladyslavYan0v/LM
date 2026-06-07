@@ -3,6 +3,7 @@ import sys
 import pygame
 from ctypes import wintypes
 from assets import AssetManager
+from commands import Command
 from constants import ScreenState
 from menus import MainMenuState, SettingsMenuState, LoadMenuState, PauseMenuState, StoryState
 from room import RoomState
@@ -11,7 +12,10 @@ from room import RoomState
 class GameController:
     def __init__(self):
         pygame.init()
-        pygame.mixer.init()
+        try:
+            pygame.mixer.init()
+        except pygame.error as error:
+            print(f"Warning: audio disabled because mixer failed to initialize: {error}")
 
         self.assets = AssetManager()
         display_info = pygame.display.Info()
@@ -95,9 +99,14 @@ class GameController:
 
     def set_state(self, state_id):
         old_state = self.current_state
+        if old_state and hasattr(old_state, "on_exit"):
+            old_state.on_exit()
+
         self.current_state = self.states[state_id]
         current_size = self.screen.get_size()
         self.current_state.resize(*current_size)
+        if hasattr(self.current_state, "on_enter"):
+            self.current_state.on_enter()
 
         if state_id == ScreenState.MAIN_MENU:
             self.main_menu_state.reset_hovers()
@@ -182,21 +191,11 @@ class GameController:
             cmd_state = self.current_state
             cmd = getattr(cmd_state, "pending_command", None)
             
-            if cmd is not None:
-                if hasattr(cmd_state, "clear_pending_command"):
-                    cmd_state.clear_pending_command()
+            if cmd is not None and hasattr(cmd_state, "clear_pending_command"):
+                cmd_state.clear_pending_command()
 
-            if cmd == "APPLY_DISPLAY_MODE":
-                 self._apply_display_mode()
-            elif isinstance(cmd, tuple) and cmd[0] == "START_STORY":
-                 self.story_state.setup_story(cmd[1])
-                 self.set_state(ScreenState.STORY)
-            elif isinstance(cmd, tuple) and cmd[0] == "START_LEVEL":
-                 self.level_state.setup_level(cmd[1])
-                 self.set_state(ScreenState.LEVEL)
-            elif cmd == "GOTO_MAIN_MENU":
-                 self.assets.play_music("music", "ingame_menu.flac")
-                 self.set_state(ScreenState.MAIN_MENU)
+            if isinstance(cmd, Command):
+                cmd.execute(self)
 
             self.current_state.update(dt, mouse_pos)
             self.current_state.draw(self.screen)

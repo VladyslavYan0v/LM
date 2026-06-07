@@ -3,6 +3,7 @@ import struct
 import pygame
 import math
 from assets import AssetManager
+from commands import GoToMainMenuCommand, StartStoryCommand
 from constants import WHITE, ScreenState, get_font
 
 
@@ -13,6 +14,7 @@ class RoomMap:
     TILE_DOOR_OPEN = 4
     TILE_PORTAL = 5
     TILE_PORTAL_INVERTED = 6
+    TILE_EXIT = 7
 
     TILE_COLORS = {
         0: (15, 15, 35),
@@ -22,6 +24,7 @@ class RoomMap:
         TILE_DOOR_OPEN: (200, 180, 80),
         TILE_PORTAL: (140, 120, 220),
         TILE_PORTAL_INVERTED: (120, 220, 200),
+        TILE_EXIT: (100, 220, 120),
     }
 
     TILE_COLORS_INVERTED = {
@@ -31,6 +34,7 @@ class RoomMap:
         TILE_DOOR_OPEN: TILE_COLORS[TILE_WALL],
         TILE_PORTAL: TILE_COLORS[TILE_PORTAL_INVERTED],
         TILE_PORTAL_INVERTED: TILE_COLORS[TILE_PORTAL],
+        TILE_EXIT: TILE_COLORS[TILE_EXIT],
     }
 
     TILE_ASSETS = {
@@ -38,6 +42,7 @@ class RoomMap:
         TILE_WALL: ("rooms", "wall.png"),
         TILE_PORTAL: ("rooms", "portal.png"),
         TILE_PORTAL_INVERTED: ("rooms", "portal_inverted.png"),
+        TILE_EXIT: ("rooms", "portal.png"),
     }
 
     INVERTED_TILE_ASSETS = {
@@ -45,6 +50,7 @@ class RoomMap:
         TILE_WALL: ("rooms", "wall_inverted.png"),
         TILE_PORTAL: ("rooms", "portal_inverted.png"),
         TILE_PORTAL_INVERTED: ("rooms", "portal.png"),
+        TILE_EXIT: ("rooms", "portal_inverted.png"),
     }
 
     def __init__(self, assets: AssetManager, filename: str):
@@ -78,6 +84,10 @@ class RoomMap:
             self.tile_images[tile_id] = self.assets.get_image(*path_parts)
         for tile_id, path_parts in self.INVERTED_TILE_ASSETS.items():
             self.inverted_tile_images[tile_id] = self.assets.get_image(*path_parts)
+        # optional overlay for exit tiles (drawn above floor)
+        self.exit_overlay = self.assets.get_image("rooms", "final_portal-nobg.png")
+        # optional inverted overlay (fall back to normal if missing)
+        self.exit_overlay_inverted = self.assets.get_image("rooms", "final_portal-nobg-inv.png")
 
     def get_tile(self, x: int, y: int, inverted: bool = False) -> int:
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
@@ -101,6 +111,8 @@ class RoomMap:
             return RoomMap.TILE_PORTAL_INVERTED
         if tile_id == RoomMap.TILE_PORTAL_INVERTED:
             return RoomMap.TILE_PORTAL
+        if tile_id == RoomMap.TILE_EXIT:
+            return RoomMap.TILE_EXIT
         return tile_id
 
     def is_walkable(self, x: int, y: int, inverted: bool = False) -> bool:
@@ -116,6 +128,8 @@ class RoomMap:
         if tile == self.TILE_DOOR_OPEN:
             return True
         if tile == self.TILE_PORTAL or tile == self.TILE_PORTAL_INVERTED:
+            return True
+        if tile == self.TILE_EXIT:
             return True
         return False
 
@@ -133,12 +147,16 @@ class RoomMap:
                 return self.inverted_tile_images.get(self.TILE_PORTAL) or self.tile_images.get(self.TILE_PORTAL)
             if tile_id == self.TILE_PORTAL_INVERTED:
                 return self.inverted_tile_images.get(self.TILE_PORTAL_INVERTED) or self.tile_images.get(self.TILE_PORTAL_INVERTED)
+            if tile_id == self.TILE_EXIT:
+                return self.inverted_tile_images.get(self.TILE_PORTAL_INVERTED) or self.tile_images.get(self.TILE_PORTAL_INVERTED)
             return self.inverted_tile_images.get(tile_id) or self.tile_images.get(tile_id)
 
         if tile_id == self.TILE_DOOR_CLOSED:
             return self.tile_images.get(self.TILE_WALL)
         if tile_id == self.TILE_DOOR_OPEN:
             return self.tile_images.get(self.TILE_FLOOR)
+        if tile_id == self.TILE_EXIT:
+            return self.tile_images.get(self.TILE_PORTAL)
         return self.tile_images.get(tile_id)
 
     def get_tile_color(self, tile_id: int, inverted: bool = False):
@@ -240,6 +258,23 @@ class RoomState:
         self.distortion_intensity = 0.0
         self.time_elapsed = 0.0
 
+    @staticmethod
+    def format_time(milliseconds: float) -> str:
+        total_seconds = int(milliseconds // 1000)
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _trigger_level_exit(self):
+        if self.level_complete:
+            return
+
+        self.level_complete = True
+        self.transition_target = None
+        self.assets.max_unlocked_level = max(self.assets.max_unlocked_level, self.current_level_idx + 1)
+        self.assets.save_settings()
+        self.assets.play_sfx("sfx", "click.wav")
+
     def resize(self, width: int, height: int):
         self.tile_size = max(48, int(height * 0.08))
         self.font = get_font(max(16, int(height * 0.035)))
@@ -260,13 +295,13 @@ class RoomState:
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self.menu_btn_rect.collidepoint(event.pos):
                     self.assets.play_sfx("sfx", "click.wav")
-                    pygame.mixer.music.fadeout(1000)
-                    self.transition_target = "GOTO_MAIN_MENU"
+                    self.assets.fadeout_music(1000)
+                    self.transition_target = GoToMainMenuCommand()
                     self.fade_direction = 1
                 elif self.next_btn_rect.collidepoint(event.pos) and self.current_level_idx < 3:
                     self.assets.play_sfx("sfx", "click.wav")
-                    pygame.mixer.music.fadeout(1000)
-                    self.transition_target = ("START_STORY", self.current_level_idx + 1)
+                    self.assets.fadeout_music(1000)
+                    self.transition_target = StartStoryCommand(self.current_level_idx + 1)
                     self.fade_direction = 1
             return None
 
@@ -333,6 +368,8 @@ class RoomState:
                 if tile_id == self.room_map.TILE_PORTAL or tile_id == self.room_map.TILE_PORTAL_INVERTED:
                     self.world_inverted = not self.world_inverted
                     self.assets.play_sfx("sfx", "click.wav")
+                elif tile_id == self.room_map.TILE_EXIT:
+                    self._trigger_level_exit()
         
         if not keys[pygame.K_UP] and not keys[pygame.K_w] and not keys[pygame.K_DOWN] and not keys[pygame.K_s] and not keys[pygame.K_LEFT] and not keys[pygame.K_a] and not keys[pygame.K_RIGHT] and not keys[pygame.K_d]:
             self.move_this_frame = False
@@ -393,6 +430,29 @@ class RoomState:
                     else:
                         continue
                 else:
+                    # Special-case exit tiles: draw floor underneath and an overlay sprite on top
+                    if raw_tile == self.room_map.TILE_EXIT:
+                        # draw floor (respecting inversion)
+                        floor_img = self.room_map.get_tile_image(self.room_map.TILE_FLOOR, self.world_inverted)
+                        if floor_img:
+                            floor_img = pygame.transform.smoothscale(floor_img, (self.tile_size, self.tile_size))
+                            draw_surface.blit(floor_img, rect)
+                        else:
+                            pygame.draw.rect(draw_surface, self.room_map.get_tile_color(self.room_map.TILE_FLOOR, self.world_inverted), rect)
+
+                        # choose overlay (prefer inverted variant when world inverted)
+                        overlay = None
+                        if self.world_inverted and getattr(self.room_map, "exit_overlay_inverted", None):
+                            overlay = self.room_map.exit_overlay_inverted
+                        else:
+                            overlay = getattr(self.room_map, "exit_overlay", None)
+
+                        if overlay:
+                            overlay_img = pygame.transform.smoothscale(overlay, (self.tile_size, self.tile_size))
+                            overlay_rect = overlay_img.get_rect(center=rect.center)
+                            draw_surface.blit(overlay_img, overlay_rect)
+                        continue
+
                     image = self.room_map.get_tile_image(raw_tile, self.world_inverted)
                     if image:
                         image = pygame.transform.smoothscale(image, (self.tile_size, self.tile_size))
@@ -440,9 +500,13 @@ class RoomState:
             state_surface = self.hint_font.render(f"World: {state_text}", True, WHITE)
             screen.blit(state_surface, (20, 60))
 
+            timer_text = self.format_time(self.time_elapsed)
+            timer_surface = self.hint_font.render(f"Time: {timer_text}", True, WHITE)
+            screen.blit(timer_surface, (20, 100))
+
             hint_surface = self.hint_font.render("Use WASD/arrows to move, I to invert, ESC for Pause. Press 'P' to cheat win.", True, WHITE)
             screen.blit(hint_surface, (20, screen.get_height() - 40))
-            
+
         if self.level_complete:
             overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 180))
