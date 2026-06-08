@@ -1,5 +1,4 @@
 @echo off
-rem Static launcher: compile sources and build a Windows executable.
 setlocal
 
 where py >nul 2>&1
